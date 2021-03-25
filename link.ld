@@ -1,5 +1,12 @@
 SECTIONS
 {
+    /*. = 0x0;
+    .exception_vector :
+    {
+        . = 0x280;
+        KEEP(*(.SP_ELx_IRQ))
+    }*/
+
     . = 0x80000;
     __start_start = .;
     .text :
