@@ -110,7 +110,8 @@ impl Camera {
         }
     }
     pub fn render_ascii(&self, shapes: &[&dyn Shape]) {
-        const INTENSITY: &[u8] = b" .,-~:;=!*#$@";
+        //const INTENSITY: &[u8] = b" .,-~:;=!*#$@";
+        const INTENSITY: &[u8] = b" -.,:~!*=$@#";
 
         //let mut res = alloc::vec![0u8; (self.width + 2) * self.height];
 
