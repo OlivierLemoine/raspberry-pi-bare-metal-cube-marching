@@ -90,6 +90,7 @@ impl core::ops::Mul<f32> for Vec3 {
 
 pub type Color = Vec3;
 
+#[derive(Clone)]
 pub struct Camera {
     position: Vec3,
     rotation: Vec3,
@@ -109,33 +110,67 @@ impl Camera {
             precision: 0.1,
         }
     }
-    pub fn render_ascii(&self, shapes: &[&dyn Shape]) {
-        //const INTENSITY: &[u8] = b" .,-~:;=!*#$@";
+    pub fn render_ascii(&self, shapes: &'static [&'static dyn Shape]) {
         const INTENSITY: &[u8] = b" -.,:~!*=$@#";
 
-        //let mut res = alloc::vec![0u8; (self.width + 2) * self.height];
+        let res = sync::Arc::new(sync::Mutex::new(
+            alloc::vec![0u8; (self.width + 2) * self.height],
+        ));
 
-        for y in 0..self.height {
-            hal::eprintln!();
-            //unsafe { *res.get_unchecked_mut(0 + y * self.width) = b'\n' };
-            //unsafe { *res.get_unchecked_mut(1 + y * self.width) = b'\r' };
-            for x in 0..self.width {
-                let color = self.pixel_render(x, y, shapes);
-                let r = color.x;
-                let g = color.y;
-                let b = color.z;
-                let grey_v = (r + g + b) / 3.;
+        let make_thread = |from: usize, to: usize| {
+            let res = res.clone();
+            let this = self.clone();
+            move || {
+                for y in from..to {
+                    res.lock()[0 + y * this.width] = b'\n';
+                    res.lock()[1 + y * this.width] = b'\r';
+                    for x in 0..this.width {
+                        let color = this.pixel_render(x, y, shapes);
+                        let r = color.x;
+                        let g = color.y;
+                        let b = color.z;
+                        let grey_v = (r + g + b) / 3.;
 
-                let idx = (grey_v * (INTENSITY.len() - 1) as f32) as usize;
+                        let idx = (grey_v * (INTENSITY.len() - 1) as f32) as usize;
 
-                let v = INTENSITY[idx];
-                hal::eprint!("{}", v as char);
-                //unsafe { *res.get_unchecked_mut((x + 2) + y * self.width) = v };
+                        let v = INTENSITY[idx];
+
+                        res.lock()[(x + 2) + y * this.width] = v;
+                    }
+                }
             }
-        }
-        //let s = unsafe { core::str::from_utf8_unchecked(&res) };
-        //hal::eprintln!("{}", s);
-        hal::eprintln!();
+        };
+
+        let first_half = self.height / 2;
+        let second_half = self.height - first_half;
+
+        let first_quarter = first_half / 2;
+        let second_quarter = first_half - first_quarter;
+        let third_quarter = second_quarter / 2;
+        let forth_quarter = second_half - third_quarter;
+
+        let t1 = thread::thread_do(
+            1,
+            alloc::boxed::Box::new(make_thread(first_quarter, second_quarter)),
+        );
+        let t2 = thread::thread_do(
+            2,
+            alloc::boxed::Box::new(make_thread(second_quarter, third_quarter)),
+        );
+        let t3 = thread::thread_do(
+            3,
+            alloc::boxed::Box::new(make_thread(third_quarter, forth_quarter)),
+        );
+
+        (make_thread(0, first_quarter))();
+
+        t1.join();
+        t2.join();
+        t3.join();
+
+        let r = res.lock();
+        let s = unsafe { core::str::from_utf8_unchecked(&*r) };
+        hal::eprintln!("{}", s);
     }
     fn pixel_render(&self, x: usize, y: usize, shapes: &[&dyn Shape]) -> Color {
         let x = x as f32 / self.width as f32 - 0.5;
@@ -238,7 +273,7 @@ pub struct Sphere {
     pub color: Color,
 }
 impl Sphere {
-    pub fn new(x: f32, y: f32, z: f32, r: f32) -> Self {
+    pub const fn new(x: f32, y: f32, z: f32, r: f32) -> Self {
         Sphere {
             position: Vec3(x, y, z),
             radius: r,

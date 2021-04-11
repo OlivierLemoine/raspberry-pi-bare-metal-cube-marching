@@ -21,8 +21,9 @@ unsafe extern "C" fn _start() -> ! {
         main = sym main_thread_start,
         stack_base = in(reg) &STACK_BASE,
     );
-    // app_manager::wait_for_start()
-    loop {}
+    let thread_id: u64;
+    asm!("", out("x0") thread_id);
+    thread::register_thread(thread_id as usize)
 }
 
 unsafe extern "C" fn main_thread_start() -> ! {
@@ -39,11 +40,20 @@ unsafe extern "C" fn main_thread_start() -> ! {
         "end:",
     );
 
+    let arm_mem = hal::memory();
+    let arm_start = {
+        let start = u64::max(arm_mem.ptr as u64, 0x1000);
+        (start >> 4) << 4
+    };
+    let arm_size = {
+        let size = arm_mem.bytes as u64;
+        (size >> 4) << 4
+    };
+    let arm_mem_end = arm_start + arm_size;
+
+    heap::HEAP = linked_list_alloc::Alloc::new(arm_start, arm_size);
     heap::HEAP.init_allocator();
 
-    let arm_mem = hal::memory();
-    let arm_mem_end = arm_mem.as_ptr().offset(arm_mem.len() as isize);
-    heap::HEAP.update_alloc_end(arm_mem_end);
     asm!("mov sp, {}", in(reg) arm_mem_end as usize);
 
     let start_size = &START_SIZE as *const u8 as u64;
@@ -51,6 +61,9 @@ unsafe extern "C" fn main_thread_start() -> ! {
         0x80_0000 as *const u8,
         start_size as usize,
     ));
+
+    hal::init();
+    //thread::init(4);
 
     super::main();
 
@@ -64,7 +77,7 @@ mod heap {
     }
 
     #[global_allocator]
-    pub static mut HEAP: linked_list_alloc::Alloc = linked_list_alloc::Alloc::static_allocator();
+    pub static mut HEAP: linked_list_alloc::Alloc = linked_list_alloc::Alloc::new(0x1000, 0x1000);
 }
 
 mod panic_handler {
@@ -72,7 +85,9 @@ mod panic_handler {
 
     #[panic_handler]
     unsafe fn panic(p: &PanicInfo<'_>) -> ! {
-        hal::eprintln!("Panic occured !\n\r{}", p);
+        let message = alloc::format!("{}", p);
+        let _p = message.as_ptr();
+        hal::eprintln!("Panic occured !\n\r{}", message);
         loop {}
     }
 }
